@@ -1,0 +1,194 @@
+---
+title: "PSYR6003_Assignment_4"
+format: docx
+editor: visual
+author: Alireza Aleali
+---
+
+## **Loading Required Packages**
+
+```{r}
+library(tidyverse)
+library(haven)
+library(lme4)
+library(flexplot)
+library(ggeffects)
+library(patchwork)
+library(e1071)
+```
+
+## **Reading and Preparing Data**
+
+```{r}
+data = read_sav("/Users/alireza/Desktop/Rclass/Assignment/4th_assignment/P6003.A4.sav")
+
+#Converts the id column to a factor and Selects only the necessary columns for the analysis, which simplifies the dataset
+
+data = data %>% 
+  mutate(id = as.factor(id)) %>% 
+  select(id, day, swl, tipm.E, tipm.N) 
+
+#Data is already in long format which means no need for converting!
+
+```
+
+## **Testing Hypotheses and Model Building**
+
+Test a model where extraversion (tipm.E) and neuroticism (tipm.N) are predictors, and the dependent variable is satisfaction with life (swl). 
+
+H1. Extraversion will be positively associated with satisfaction with life. 
+
+H2. Neuroticism will be negatively associated with satisfaction with life. 
+
+H3. The effects will be similar for both level 1 (within participants over time) and level 2 (between participants). 
+
+### 
+
+## **Initial Data Exploration with Univariate Plots**
+
+```{r}
+# Using flexplot for visualization
+a = flexplot(swl~1, data = data)
+b = flexplot(tipm.E~1, data = data)
+c = flexplot(tipm.N~1, data = data)
+
+# Arranging plots
+a+b/c
+
+```
+
+The distribution of satisfaction with life scores may not perfectly follow a normal distribution as it shows a slight skew towards the left. The scores for Extraversion appear to be roughly normal. On the other hand, Neuroticism exhibits a slight skew towards the right. There do not appear to be any significant outliers in the data.
+
+## **Baseline Mixed Model (proof of essential need for mixed effect model)**
+
+```{r}
+# Basic model with only random intercepts for 'id'
+baseline <- lmer(swl ~ 1+(1|id), data = data)
+
+# Calculate Intraclass Correlation Coefficient
+icc_value=icc(baseline)
+cluster_sizes <- table(data$id)  # Creates a table of the number of occurrences of each cluster ID
+average_cluster_size <- mean(cluster_sizes) # needed for calculating Design Effect
+
+
+# Calculate DEFF using the ICC and average cluster size
+class(icc_value) 
+icc_value <- as.numeric(icc_value) #since it's not numeric we need to convert it!
+deff_calculated <- 1 + (average_cluster_size - 1) * icc_value
+
+print(paste("Average Cluster Size:", average_cluster_size))
+print(paste("ICC:", icc_value))
+print(paste("Calculated Design Effect:", deff_calculated))
+```
+
+The analysis of the baseline mixed model revealed an **Intraclass Correlation Coefficient (ICC) of 0.74**, indicating that approximately 74% of the variance in life satisfaction scores is due to differences between subjects. This high ICC value underscores substantial similarities within each subject compared to variations between different subjects. Additionally, a **design effect of 12.3** suggests that ignoring the data's clustered nature would significantly underestimate variance, implying the necessity of using a linear mixed model (LMM). Not using an LMM could lead to pseudoreplication, where the effective sample size is falsely inflated by about 12 times, potentially skewing the statistical significance of the results. Using a **linear mixed model** is crucial for accurately accounting for clustering in the data, ensuring valid statistical analysis and reliable study conclusions.
+
+## **Exploratory Model Building (Testing Random x Fixed effects in model)**
+
+```{r}
+#add extraversion as fixed effect
+extra_fixed = lmer(swl ~  tipm.E + (1|id), data = data)
+#add it as a random effect
+extra_random = lmer(swl ~  tipm.E + (tipm.E|id), data = data) 
+#comparing the models
+model.comparison(extra_fixed, extra_random)
+
+#same process with neuroticism, to see model fit #consider neuroticism as a fixed effect
+neuro_fixed = lmer(swl ~  tipm.E + tipm.N + (tipm.E|id), data = data)
+model.comparison(extra_random, neuro_fixed)
+
+#Considering neuroticism as a random effect
+neuro_random = lmer(swl ~  tipm.E + tipm.N + (tipm.E+tipm.N|id), data = data) 
+model.comparison(neuro_fixed, neuro_random)
+
+#Final model
+model = lmer(swl ~  tipm.E + tipm.N + (tipm.E+tipm.N|id), data = data) 
+```
+
+Upon evaluating models, it was determined that treating extraversion as a random effect yielded better results, evidenced by lower AIC and BIC values, a higher Bayes factor, and significant p-values. Further analysis included adding neuroticism to the model, which significantly improved the model's performance based on the same metrics. Consequently, the final model that treats both extraversion and neuroticism as random effects was deemed most effective.
+
+```{r}
+visualize(model, plot = "model")
+visualize(model, plot = "residuals" )
+#checking kurtosis
+res = residuals(model)
+kurtosis(res)
+```
+
+The histogram of the residuals displays a bell-shaped distribution but exhibits leptokurtosis (the kurtosis is greater than 3). The plot of residuals against predicted values shows a slight pattern, which is generally undesirable, though the zero slope suggests that the data are sufficiently linear. The scale-location plot reveals a minimal slope, indicating little heteroscedasticity. Independence is no longer considered an assumption in this context.
+
+```{r}
+summary(model)
+
+```
+
+The summary output indicates that the coefficients for Extraversion and Neuroticism exceed their respective standard errors, suggesting that both have statistically significant slopes.
+
+Variability attributed to random effects:
+
+```{r}
+totalVar = 2.02500 + 0.01983 + 0.03510 + 0.48874
+#Total variance = 2.56867
+(idVar = (2.02500/totalVar)*100)
+```
+
+a substantial portion of the variation in the data, specifically 78.83%, is attributed to differences among participants, as indicated by the participant ID treated as a random effect. After adjusting for fixed effects in the model, participant ID still accounts for 79% of the unexplained variance, highlighting its significant influence on the outcomes of the model.
+
+#### **Model estimation**
+
+```{r}
+estimates(model)
+library(performance)
+r2(model)
+```
+
+For each one-unit increase in extraversion, life satisfaction increases by 0.16, accounting for neuroticism. Conversely, each one-unit increase in neuroticism decreases life satisfaction by 0.21, accounting for extraversion.
+
+The R-squared residual (within individuals) is 26%, indicating that the model accounts for 26% of the variance in life satisfaction from one time point to another within the same individual.
+
+The R-squared intercept (across individuals) is 0%, suggesting that the model does not explain any of the variance in life satisfaction between different individuals. Extraversion and neuroticism do not contribute to understanding differences in life satisfaction across individuals.
+
+However, the model does a reasonable job of explaining variability in life satisfaction within an individual over time, capturing 26% of this variability. Extraversion and neuroticism are significant in explaining these within-individual differences over time.
+
+The Conditional R-squared, which represents the proportion of variance explained by both fixed and random effects, is 0.788, indicating a substantial overall model fit. The Marginal R-squared, representing the variance explained by fixed effects alone, is 0.094, showing a more modest contribution from the fixed effects.
+
+#### **Summary Statistics**
+
+```{r}
+library(apaTables)
+
+dataReduced = data %>% 
+  drop_na() %>%
+  select(id, swl, tipm.E, tipm.N) 
+head(dataReduced)
+
+table1 = apa.cor.table(dataReduced, table.number=1, filename = "Correlation_Table")
+print(table1)
+
+table1 = as.tibble(table1$table.body)
+table1 = table1 %>% 
+  mutate(row = c(1:8)) %>% 
+  filter(row == "1" |row == "3" |row == "4"|row == "6"|row == "7") %>% 
+  select(!(row))
+print(table1)
+
+write.csv(table1, file="table1.csv")
+```
+
+#### **Results of the Model**
+
+```{r}
+library(broom.mixed)
+
+tidyModel = tidy(model, effects = "fixed", conf.int=TRUE)
+print(tidyModel)
+
+est = estimates(model)
+icc = as_tibble(est$icc[1], rownames="icc")
+rsq = as_tibble(est$r.squared, rownames = "R squared")
+
+
+Table2 = dplyr::bind_rows(tidyModel, icc, rsq)
+print(Table2)
+write.csv(Table2, file="table2.csv")
+```
